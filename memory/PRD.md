@@ -1,63 +1,81 @@
 # AlterEcho - Real-Time Voice Transformation App
 
 ## Overview
-AlterEcho is a real-time voice transformation mobile application that processes microphone audio through various DSP effects with zero-latency priority. All audio processing happens client-side using the Web Audio API for minimal round-trip time (~6ms with 256-sample buffer).
+AlterEcho is a real-time voice transformation mobile app with zero-latency client-side audio processing via Web Audio API (~6ms with 256-sample buffer). All DSP runs in the browser's audio thread — no network hops.
 
 ## Architecture
 - **Frontend**: React Native (Expo SDK 54) with expo-router
-- **Backend**: FastAPI (Python) - minimal, serves health check only
+- **Backend**: FastAPI (Python) - health check only
 - **Audio Engine**: Web Audio API (ScriptProcessorNode, DynamicsCompressorNode, AnalyserNode)
-- **Database**: MongoDB (for basic app state)
 
-## Core Features
+## Features
 
-### Audio Processing (Client-Side, Zero Latency)
-- **Robotic Effect**: Ring modulation using 200Hz sine wave carrier
-- **Heavy Effect**: Pitch shift down (factor 0.65) via circular buffer resampling
-- **Chipmunk Effect**: Pitch shift up (factor 1.7) via circular buffer resampling
-- **Echo Effect**: Delay buffer with 4 levels (OFF, 100ms/30% feedback, 250ms/50%, 500ms/70%)
-- **Noise Gate**: Amplitude threshold gate (0.015) to suppress background noise
-- **Dynamic Range Compressor**: Web Audio DynamicsCompressorNode (threshold -24dB, ratio 12:1)
+### 10 Voice Profiles
+| Profile | Effect | Echo | Compressor | Noise Gate |
+|---------|--------|------|------------|------------|
+| Radio Host | None | Off | On | On |
+| Villain | Heavy (0.55x) | L2 | On | Off |
+| Alien | Robotic (300Hz) | L1 | Off | Off |
+| Underwater | Heavy (0.45x) | L3 | Off | Off |
+| Megaphone | Robotic (400Hz) | Off | On | On |
+| Whisper | None | L1 | Off | On |
+| Stadium | None | L3 | On | Off |
+| Telephone | Robotic (350Hz) | Off | On | On |
+| Cave | None | L3 | Off | Off |
+| Robot DJ | Robotic (150Hz) | Off | On | Off |
 
-### UI/UX
-- Enterprise Vibrant dark theme (#09090B background, #06B6D4 cyan accents)
-- Real-time waveform visualizer (32-bar frequency display at ~30fps)
-- High-elevation Input/Output cards with gain/volume sliders
-- 2x2 effects grid with toggle behavior
-- Echo level pill selector (0-3)
-- Audio routing selector (Speaker/Headphones/Bluetooth)
-- Master power on/off toggle
+### Voice Effects (Mutually Exclusive)
+- **Robotic**: Ring modulation (configurable carrier frequency)
+- **Heavy**: Pitch shift down (configurable factor, default 0.65)
+- **Chipmunk**: Pitch shift up (configurable factor, default 1.7)
 
-### Audio Chain
+### Echo (Separate Toggle, Combinable with Any Effect)
+- Level 0: OFF
+- Level 1: 100ms delay, 30% feedback
+- Level 2: 250ms delay, 50% feedback
+- Level 3: 500ms delay, 70% feedback
+
+### Audio Enhancement
+- Dynamic Range Compressor (threshold -24dB, ratio 12:1)
+- Noise Gate (amplitude threshold 0.015)
+
+### Device Selection
+- Microphone dropdown: Enumerate all audio input devices (phone mic, Bluetooth, wired)
+- Speaker dropdown: Enumerate all audio output devices (phone speaker, Bluetooth, wired)
+- Hot-swap devices while audio is running (no interruption)
+- Auto-detect device connect/disconnect events
+- Supports routing one Bluetooth device mic → another Bluetooth device speaker
+
+### Waveform Visualizer
+- 32-bar frequency display from AnalyserNode
+- ~30fps update rate
+
+## Audio Processing Chain
 ```
-Mic → InputGain → ScriptProcessor (effects + noise gate) → DynamicsCompressor → OutputGain → Analyser → Speakers
+Mic → InputGain → ScriptProcessor(NoiseGate → Effect → Echo) → Compressor → OutputGain → Analyser → Speakers
 ```
-
-## Technical Details
-- Buffer size: 256 samples (~6ms at 44.1kHz)
-- Sample rate: 44100 Hz
-- Pitch buffer: 16384 samples for smooth shifting
-- Echo buffer: 44100 samples (1 second max)
-- Visualization: 30fps frequency data from AnalyserNode
 
 ## File Structure
 ```
 frontend/
   app/
-    _layout.tsx          - Root layout with dark StatusBar
-    index.tsx            - Main AlterEcho screen (all UI components)
+    _layout.tsx              - Root layout
+    index.tsx                - Main screen (all UI)
   src/
-    hooks/
-      useAudioEngine.ts  - Web Audio API engine (core DSP)
-    constants/
-      theme.ts           - Color palette constants
+    hooks/useAudioEngine.ts  - Web Audio API engine
+    constants/theme.ts       - Color palette
+    constants/profiles.ts    - 10 voice profile presets
+  eas.json                   - EAS Build config for APK
 backend/
-  server.py              - FastAPI health check
+  server.py                  - FastAPI health check
 ```
 
-## No Authentication Required
-This is a standalone utility app with no user accounts.
+## Testing
+- All 48 tests passing (5 backend + 43 frontend)
+- Test on web preview, phone browser, or build APK via EAS
 
-## Permissions
-- Android: RECORD_AUDIO
-- iOS: NSMicrophoneUsageDescription - "Transform your voice with real-time effects"
+## Planned: Crack Protection (Google Account Verification)
+- Google Sign-In on app launch only (not during audio playback)
+- Backend verifies purchase receipt from Play Store
+- Once verified, audio runs with zero latency
+- Re-verify on next app launch or every 24 hours
