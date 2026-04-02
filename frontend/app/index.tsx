@@ -246,7 +246,26 @@ export default function AlterEchoScreen() {
 
         {/* ── Devices ── */}
         <View style={s.card} testID="devices-card">
-          <Text style={s.cardLabel}>DEVICES</Text>
+          <View style={s.cardHead}>
+            <Text style={s.cardLabel}>DEVICES</Text>
+            <TouchableOpacity
+              testID="refresh-devices-btn"
+              onPress={engine.refreshDevices}
+              style={s.refreshBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="refresh-outline" size={16} color={COLORS.primary} />
+              <Text style={s.refreshBtnText}>Detect</Text>
+            </TouchableOpacity>
+          </View>
+          {engine.inputDevices.length <= 1 && !engine.isActive && (
+            <View style={s.deviceHint}>
+              <Ionicons name="information-circle-outline" size={14} color={COLORS.warning} />
+              <Text style={s.deviceHintText}>
+                Tap power button first — devices are listed after mic permission is granted. Connect Bluetooth devices before starting.
+              </Text>
+            </View>
+          )}
           <DeviceDropdown
             testID="mic-selector"
             label="MICROPHONE"
@@ -328,9 +347,16 @@ export default function AlterEchoScreen() {
         <View style={s.footer}>
           <Text style={s.footerText}>
             {Platform.OS === 'web'
-              ? 'Web Audio API \u2022 256-sample buffer \u2022 ~6ms latency'
+              ? engine.latencyMs !== null
+                ? `AudioWorklet \u2022 128-sample quantum \u2022 ${engine.latencyMs}ms measured latency`
+                : 'AudioWorklet \u2022 128-sample quantum \u2022 ~3ms processing'
               : 'Connect via web preview for real-time audio'}
           </Text>
+          {engine.isActive && (
+            <Text style={s.footerHint}>
+              {engine.inputDevices.length} input(s) \u2022 {engine.outputDevices.length} output(s) detected
+            </Text>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -492,6 +518,23 @@ const s = StyleSheet.create({
   echoPillTextOn: { color: COLORS.primary },
 
   // Footer
-  footer: { alignItems: 'center', paddingVertical: 8 },
+  footer: { alignItems: 'center', paddingVertical: 8, gap: 4 },
   footerText: { fontSize: 10, color: COLORS.textMuted, letterSpacing: 0.5 },
+  footerHint: { fontSize: 9, color: COLORS.textMuted, letterSpacing: 0.3 },
+
+  // Refresh button
+  refreshBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+    backgroundColor: 'rgba(6,182,212,0.08)', borderWidth: 1, borderColor: 'rgba(6,182,212,0.2)',
+  },
+  refreshBtnText: { fontSize: 10, fontWeight: '700', color: COLORS.primary, letterSpacing: 0.5 },
+
+  // Device hint
+  deviceHint: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: 8, padding: 10,
+    borderWidth: 1, borderColor: 'rgba(245,158,11,0.15)',
+  },
+  deviceHintText: { fontSize: 11, color: COLORS.textSecondary, flex: 1, lineHeight: 16 },
 });
