@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useAudioEngine, EffectType, AudioDevice } from '../src/hooks/useAudioEngine';
+import { useAudioEngine, EffectType, AudioDevice, AudioMode } from '../src/hooks/useAudioEngine';
 import { COLORS } from '../src/constants/theme';
 import { VOICE_PROFILES } from '../src/constants/profiles';
 
@@ -215,6 +215,37 @@ export default function AlterEchoScreen() {
             <Text style={s.errorText}>{engine.error}</Text>
           </View>
         )}
+
+        {/* ── Audio Mode ── */}
+        <View style={s.modeCard} testID="audio-mode-card">
+          <View style={s.modeRow}>
+            <TouchableOpacity
+              testID="mode-room"
+              onPress={() => engine.setAudioMode('room')}
+              style={[s.modeBtn, engine.audioMode === 'room' && s.modeBtnOn]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="volume-high" size={18} color={engine.audioMode === 'room' ? COLORS.primary : COLORS.textSecondary} />
+              <Text style={[s.modeBtnText, engine.audioMode === 'room' && s.modeBtnTextOn]}>Same Room</Text>
+              <Text style={s.modeBtnHint}>AEC on</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="mode-headphone"
+              onPress={() => engine.setAudioMode('headphone')}
+              style={[s.modeBtn, engine.audioMode === 'headphone' && s.modeBtnOn]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="headset" size={18} color={engine.audioMode === 'headphone' ? COLORS.primary : COLORS.textSecondary} />
+              <Text style={[s.modeBtnText, engine.audioMode === 'headphone' && s.modeBtnTextOn]}>Headphone</Text>
+              <Text style={s.modeBtnHint}>Ultra-low</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={s.modeInfo}>
+            {engine.audioMode === 'room'
+              ? 'Echo cancellation active — prevents speaker-to-mic feedback'
+              : 'Echo cancellation off — use headphones to avoid feedback loop'}
+          </Text>
+        </View>
 
         {/* ── Voice Profiles ── */}
         <Text style={s.sectionLabel}>VOICE PROFILES</Text>
@@ -537,4 +568,24 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(245,158,11,0.15)',
   },
   deviceHintText: { fontSize: 11, color: COLORS.textSecondary, flex: 1, lineHeight: 16 },
+
+  // Audio Mode
+  modeCard: {
+    backgroundColor: COLORS.surface, borderRadius: 14, borderWidth: 1,
+    borderColor: COLORS.border, padding: 14, gap: 10,
+  },
+  modeRow: { flexDirection: 'row', gap: 10 },
+  modeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.background,
+    borderWidth: 1.5, borderColor: COLORS.border,
+  },
+  modeBtnOn: {
+    borderColor: COLORS.primary, backgroundColor: 'rgba(6,182,212,0.06)',
+    boxShadow: '0 0 8px rgba(6,182,212,0.2)',
+  },
+  modeBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary },
+  modeBtnTextOn: { color: COLORS.primary },
+  modeBtnHint: { fontSize: 9, fontWeight: '600', color: COLORS.textMuted },
+  modeInfo: { fontSize: 10, color: COLORS.textMuted, textAlign: 'center', lineHeight: 14 },
 });

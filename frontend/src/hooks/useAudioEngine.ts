@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { VoiceProfile } from '../constants/profiles';
 
 export type EffectType = 'none' | 'robotic' | 'heavy' | 'chipmunk';
+export type AudioMode = 'room' | 'headphone';
 
 export interface AudioDevice {
   deviceId: string;
@@ -11,9 +12,9 @@ export interface AudioDevice {
 
 const isWeb = Platform.OS === 'web';
 const PITCH_BUF = 16384;
-const ECHO_BUF = 44100;
+const ECHO_BUF = 48000; // 1 second at 48kHz
 
-// ── AudioWorklet processor code (runs on audio thread, NOT main thread) ──
+// ── AudioWorklet processor (runs on dedicated audio rendering thread) ──
 const WORKLET_CODE = `
 class AlterEchoProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -26,7 +27,7 @@ class AlterEchoProcessor extends AudioWorkletProcessor {
     this.pf = 1.0;
     this.cnt = 0;
     this.PB = 16384;
-    this.EB = 44100;
+    this.EB = 48000;
     this.pb = new Float32Array(this.PB);
     this.pW = 0;
     this.pR = 0;
@@ -101,14 +102,15 @@ export function useAudioEngine() {
   const [effect, setEffectState] = useState<EffectType>('none');
   const [echoEnabled, setEchoEnabledState] = useState(false);
   const [echoLevel, setEchoLevelState] = useState(0);
-  const [gain, setGainState] = useState(80);
-  const [volume, setVolumeState] = useState(80);
+  const [gain, setGainState] = useState(70);
+  const [volume, setVolumeState] = useState(70);
   const [compressor, setCompressorState] = useState(false);
   const [noiseGate, setNoiseGateState] = useState(false);
   const [waveformData, setWaveformData] = useState<number[]>(new Array(32).fill(0));
   const [error, setError] = useState<string | null>(null);
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [audioMode, setAudioModeState] = useState<AudioMode>('room');
 
   // Device state
   const [inputDevices, setInputDevices] = useState<AudioDevice[]>([]);
@@ -144,7 +146,7 @@ export function useAudioEngine() {
     eW: 0,
   });
 
-  // ── Unified DSP param update (both worklet + fallback ref) ──
+  // ── Unified DSP param update ──
   const updateDSP = (params: Record<string, any>) => {
     Object.entries(params).forEach(([k, v]) => {
       (dsp.current as any)[k] = v;
@@ -184,32 +186,36 @@ export function useAudioEngine() {
     }
   }, [compressor]);
 
-  // ── Device enumeration ──
-  const refreshDevices = async (): Promise<{ inputs: AudioDevice[]; outputs: AudioDevice[] } | null> => {
-    if (!isWeb) return null;
+  // ── Device enumeration with retry ──
+  const refreshDevices = async (): Promise<void> => {
+    if (!isWeb) return;
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const inputs = devices
         .filter((d) => d.kind === 'audioinput')
         .map((d, i) => ({
           deviceId: d.deviceId,
-          label: d.label || `Microphone ${i + 1}`,
+          label: d.label && d.label.trim() !== '' ? d.label : `Microphone ${i + 1} (${d.deviceId.slice(0, 6)})`,
         }));
       const outputs = devices
         .filter((d) => d.kind === 'audiooutput')
         .map((d, i) => ({
           deviceId: d.deviceId,
-          label: d.label || `Speaker ${i + 1}`,
+          label: d.label && d.label.trim() !== '' ? d.label : `Speaker ${i + 1} (${d.deviceId.slice(0, 6)})`,
         }));
       setInputDevices(inputs);
       setOutputDevices(outputs);
-      return { inputs, outputs };
-    } catch {
-      return null;
-    }
+    } catch {}
   };
 
-  // Auto-select first device
+  // Aggressive re-enumerate after permission (browsers sometimes delay label exposure)
+  const refreshDevicesWithRetry = async () => {
+    await refreshDevices();
+    setTimeout(() => refreshDevices(), 300);
+    setTimeout(() => refreshDevices(), 800);
+    setTimeout(() => refreshDevices(), 2000);
+  };
+
   useEffect(() => {
     if (inputDevices.length > 0 && !selectedInput) setSelectedInputState(inputDevices[0].deviceId);
   }, [inputDevices, selectedInput]);
@@ -217,7 +223,7 @@ export function useAudioEngine() {
     if (outputDevices.length > 0 && !selectedOutput) setSelectedOutputState(outputDevices[0].deviceId);
   }, [outputDevices, selectedOutput]);
 
-  // Enumerate on mount + listen for device changes (Bluetooth connect/disconnect)
+  // Enumerate on mount + Bluetooth connect/disconnect events
   useEffect(() => {
     if (!isWeb) return;
     refreshDevices();
@@ -226,10 +232,28 @@ export function useAudioEngine() {
     return () => navigator.mediaDevices.removeEventListener('devicechange', handler);
   }, []);
 
-  // Cleanup
   useEffect(() => {
     return () => cancelAnimationFrame(animRef.current);
   }, []);
+
+  // ── Build mic constraints based on audio mode ──
+  const getMicConstraints = (deviceId?: string): any => {
+    const c: any = {};
+    if (deviceId) c.deviceId = { exact: deviceId };
+
+    if (audioMode === 'room') {
+      // Same Room: AEC ON to suppress speaker→mic feedback
+      c.echoCancellation = true;
+      c.noiseSuppression = true;
+      c.autoGainControl = true;
+    } else {
+      // Headphone: AEC OFF for absolute minimum latency
+      c.echoCancellation = false;
+      c.noiseSuppression = false;
+      c.autoGainControl = false;
+    }
+    return c;
+  };
 
   // ── Device hot-swap ──
   const switchInput = async (deviceId: string) => {
@@ -238,12 +262,7 @@ export function useAudioEngine() {
     if (!isActive || !ctxRef.current || !inputGainRef.current) return;
     try {
       const newStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: { exact: deviceId },
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
+        audio: getMicConstraints(deviceId),
       });
       const newSource = ctxRef.current.createMediaStreamSource(newStream);
       newSource.connect(inputGainRef.current);
@@ -252,7 +271,7 @@ export function useAudioEngine() {
       sourceRef.current = newSource;
       streamRef.current = newStream;
     } catch (err: any) {
-      setError('Failed to switch microphone: ' + (err?.message || ''));
+      setError('Failed to switch mic: ' + (err?.message || ''));
     }
   };
 
@@ -267,6 +286,33 @@ export function useAudioEngine() {
     } catch {}
   };
 
+  // ── Switch audio mode (hot-swaps mic stream with new constraints) ──
+  const setAudioMode = async (mode: AudioMode) => {
+    setAudioModeState(mode);
+    if (!isActive || !ctxRef.current || !inputGainRef.current) return;
+    // Hot-swap mic stream with new echo cancellation setting
+    try {
+      const constraints: any = {};
+      if (selectedInput) constraints.deviceId = { exact: selectedInput };
+      if (mode === 'room') {
+        constraints.echoCancellation = true;
+        constraints.noiseSuppression = true;
+        constraints.autoGainControl = true;
+      } else {
+        constraints.echoCancellation = false;
+        constraints.noiseSuppression = false;
+        constraints.autoGainControl = false;
+      }
+      const newStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+      const newSource = ctxRef.current.createMediaStreamSource(newStream);
+      newSource.connect(inputGainRef.current);
+      if (sourceRef.current) sourceRef.current.disconnect();
+      if (streamRef.current) streamRef.current.getTracks().forEach((t: any) => t.stop());
+      sourceRef.current = newSource;
+      streamRef.current = newStream;
+    } catch {}
+  };
+
   // ── Start engine ──
   const start = async () => {
     if (!isWeb) {
@@ -277,26 +323,19 @@ export function useAudioEngine() {
       setError(null);
       const W = window as any;
       const Ctx = W.AudioContext || W.webkitAudioContext;
-      // Request MINIMUM latency — no sample rate conversion overhead
-      const ctx = new Ctx({ latencyHint: 0 });
+      // Use native sample rate (avoids resampling overhead — most devices are 48kHz)
+      const ctx = new Ctx({ latencyHint: 'interactive' });
       ctxRef.current = ctx;
 
-      // Set output device FIRST
+      // Set output device
       if (selectedOutput && typeof ctx.setSinkId === 'function') {
         try { await ctx.setSinkId(selectedOutput); } catch {}
       }
 
-      // Get mic — CRITICAL: echoCancellation OFF removes 20-50ms of browser AEC delay
-      const audioConstraints: any = {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      };
-      if (selectedInput) {
-        audioConstraints.deviceId = { exact: selectedInput };
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+      // Get mic with mode-appropriate constraints
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: getMicConstraints(selectedInput || undefined),
+      });
       streamRef.current = stream;
 
       const src = ctx.createMediaStreamSource(stream);
@@ -306,7 +345,7 @@ export function useAudioEngine() {
       ig.gain.value = gain / 100;
       inputGainRef.current = ig;
 
-      // ── Try AudioWorklet (audio thread, 128 samples = ~2.7ms) ──
+      // ── Try AudioWorklet (dedicated audio thread, 128-sample quantum) ──
       let processingNode: any;
       try {
         const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
@@ -316,7 +355,6 @@ export function useAudioEngine() {
         processingNode = new AudioWorkletNode(ctx, 'alter-echo-processor');
         workletRef.current = processingNode;
         usingWorklet.current = true;
-        // Send current state to worklet
         processingNode.port.postMessage({
           type: 'params',
           effect: dsp.current.effect,
@@ -327,7 +365,7 @@ export function useAudioEngine() {
           pitchFactor: dsp.current.pitchFactor,
         });
       } catch {
-        // ── Fallback: ScriptProcessorNode (main thread, 256 samples) ──
+        // Fallback: ScriptProcessorNode
         processingNode = ctx.createScriptProcessor(256, 1, 1);
         processingNode.onaudioprocess = (e: any) => {
           const inp = e.inputBuffer.getChannelData(0);
@@ -375,7 +413,7 @@ export function useAudioEngine() {
         usingWorklet.current = false;
       }
 
-      // Compressor (bypass-able: ratio=1 when off)
+      // Compressor (ratio=1 when off = pass-through)
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = compressor ? -24 : 0;
       comp.knee.value = 30;
@@ -393,35 +431,33 @@ export function useAudioEngine() {
       an.smoothingTimeConstant = 0.75;
       analyserRef.current = an;
 
-      // Chain: source → gain → processor → compressor → output → analyser → speakers
+      // Shortest chain: source → gain → worklet → compressor → output → destination
+      // Analyser on a branch (doesn't add to main audio path latency)
       src.connect(ig);
       ig.connect(processingNode);
       processingNode.connect(comp);
       comp.connect(og);
-      og.connect(an);
-      an.connect(ctx.destination);
+      og.connect(ctx.destination);
+      og.connect(an); // Branch: analyser reads from output but isn't inline
 
       // Measure actual latency
       const base = ctx.baseLatency || 0;
-      const output = ctx.outputLatency || 0;
-      setLatencyMs(Math.round((base + output) * 1000));
+      const outputLat = ctx.outputLatency || 0;
+      setLatencyMs(Math.round((base + outputLat) * 1000));
 
       setIsActive(true);
 
-      // Re-enumerate devices with labels (now that permission is granted)
-      setTimeout(async () => {
-        const result = await refreshDevices();
-        if (result) {
-          // Auto-select the device that's actually being used
-          const activeTrack = stream.getAudioTracks()[0];
-          const settings = activeTrack?.getSettings?.();
-          if (settings?.deviceId) {
-            setSelectedInputState(settings.deviceId);
-          }
-        }
-      }, 300);
+      // Re-enumerate devices with labels (aggressive retry for Bluetooth)
+      refreshDevicesWithRetry();
 
-      // Visualization loop (~30fps)
+      // Auto-detect which input device is actually being used
+      const activeTrack = stream.getAudioTracks()[0];
+      const settings = activeTrack?.getSettings?.();
+      if (settings?.deviceId) {
+        setSelectedInputState(settings.deviceId);
+      }
+
+      // Visualization (~30fps)
       let fc = 0;
       const vizLoop = () => {
         fc++;
@@ -439,7 +475,7 @@ export function useAudioEngine() {
     }
   };
 
-  // ── Stop engine ──
+  // ── Stop ──
   const stop = () => {
     cancelAnimationFrame(animRef.current);
     if (sourceRef.current) sourceRef.current.disconnect();
@@ -489,7 +525,7 @@ export function useAudioEngine() {
     setActiveProfile(null);
   };
 
-  // ── Profile application ──
+  // ── Profile ──
   const applyProfile = (profile: VoiceProfile) => {
     resetDSPBuffers();
     updateDSP({
@@ -524,6 +560,7 @@ export function useAudioEngine() {
     isWeb,
     activeProfile,
     latencyMs,
+    audioMode,
     inputDevices,
     outputDevices,
     selectedInput,
@@ -538,6 +575,7 @@ export function useAudioEngine() {
     toggleNoiseGate: () => { setNoiseGateState((p) => !p); setActiveProfile(null); },
     switchInput,
     switchOutput,
+    setAudioMode,
     applyProfile,
     refreshDevices,
   };
