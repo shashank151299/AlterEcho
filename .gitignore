@@ -3,6 +3,7 @@
 # IDE and editors
 .idea/
 .vscode/
+apks
 
 # Dependencies
 node_modules/
