@@ -6,7 +6,7 @@ export default function AndroidBridge({ children }: { children: React.ReactNode 
   if (Platform.OS === 'android') {
     return (
       <WebView 
-        source={{ uri: 'https://alterecho.vercel.app' }} // Replace with your live URL
+        source={{ uri: 'https://alter-echo-six.vercel.app/' }} // Replace with your live URL
         style={{ flex: 1 }}
         javaScriptEnabled={true}
         domStorageEnabled={true}
