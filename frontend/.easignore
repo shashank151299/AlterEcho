@@ -1,0 +1,7 @@
+node_modules/
+.metro-cache/
+.expo/
+dist/
+build/
+*.log
+.git/
