@@ -10,7 +10,7 @@ export interface AudioDevice {
   label: string;
 }
 
-const isWeb = Platform.OS === 'web';
+const isWeb = typeof window !== 'undefined';
 const PITCH_BUF = 16384;
 const ECHO_BUF = 48000; // 1 second at 48kHz
 
