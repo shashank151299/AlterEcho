@@ -4,7 +4,8 @@
 .idea/
 .vscode/
 apks
-
+.metro-cache*
+frontend/.metro-cache/*
 # Dependencies
 node_modules/
 /node_modules
