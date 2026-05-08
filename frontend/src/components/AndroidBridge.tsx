@@ -1,12 +1,16 @@
-"import React from 'react';
+import React from 'react';
 import { Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-export default function AndroidBridge({ children }: { children: React.ReactNode }) {
+type AndroidBridgeProps = {
+  children: React.ReactNode;
+};
+
+export default function AndroidBridge({ children }: AndroidBridgeProps) {
   if (Platform.OS === 'android') {
     return (
-      <WebView 
-        source={{ uri: 'https://alter-echo-six.vercel.app/' }} // Replace with your live URL
+      <WebView
+        source={{ uri: 'https://alter-echo-six.vercel.app/' }}
         style={{ flex: 1 }}
         javaScriptEnabled={true}
         domStorageEnabled={true}
@@ -16,5 +20,6 @@ export default function AndroidBridge({ children }: { children: React.ReactNode 
       />
     );
   }
+
   return <>{children}</>;
-}"
+}
